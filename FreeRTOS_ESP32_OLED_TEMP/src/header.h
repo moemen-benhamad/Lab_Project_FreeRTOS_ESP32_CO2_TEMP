@@ -40,9 +40,9 @@ typedef struct {
     float value;    
 } SensorData;
 
-SensorData buffer[10];
+SensorData buffer[200];
 
-
-
-/*_____________________________________________________________*/
+void vDht22_Task(void *pvParameters);
+void vOled_Task(void *pvParameters);
+void vco2_Task(void *pvParameters);
 void processSensorData(SensorData , float*, float*, int*);

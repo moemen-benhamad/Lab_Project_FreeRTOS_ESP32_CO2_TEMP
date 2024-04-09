@@ -1,4 +1,24 @@
 #include "header.h"
+// TODO : CHECK ALL THE FUCNTIONS
+// TODO : DECIDE ON PERIODE OF TASKS
+
+void setup() {
+  Serial.begin(115200);
+  dht.setup(DHT_PIN, DHTesp::DHT_TYPE);
+
+  s1 = xSemaphoreCreateCounting( N, N );
+  s2 = xSemaphoreCreateCounting( N, 0 );
+  mutex = xSemaphoreCreateMutex();
+
+  xTaskCreate(vDht22_Task, "dht22_Task", 4096, NULL, 1, NULL);
+  xTaskCreate(vOled_Task, "oled_Task", 4096, NULL, 1, NULL);
+  xTaskCreate(vco2_Task, "co2_Task", 4096, NULL, 1, NULL);
+  vTaskDelete(NULL);
+}
+
+void loop() {
+  vTaskDelete(NULL);
+}
 
 void vDht22_Task(void *pvParameters) {
 
@@ -51,14 +71,54 @@ void vOled_Task(void *pvParameters) {
 
     display.drawString(0, 0, "Temp: " + String(temperature) + " C");
     display.drawString(0, 12, "Humidity: " + String(humidity) + " %");
-    display.drawString(0, 24, "CO2: " + String(co2));
+    display.drawString(0, 24, "co2: " + String(co2));
 
     display.display();    
 
     // [Period]
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2000));   
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(20));   
   }
 
+  vTaskDelete(NULL);
+}
+
+void vco2_Task(void *pvParameters){
+
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+    int co2 = 0;
+
+  const uart_config_t uart_config_esp = {
+      .baud_rate = 9600,
+      .data_bits = UART_DATA_8_BITS,
+      .parity = UART_PARITY_DISABLE,
+      .stop_bits = UART_STOP_BITS_1,
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+      .source_clk = UART_SCLK_APB,
+    };
+
+  uart_driver_install(ESP_UART_PORT, RX_BUF_SIZE * 2, 0, 0, NULL, 0);
+  uart_param_config(ESP_UART_PORT, &uart_config_esp);
+  uart_set_pin(ESP_UART_PORT, ESP_TX_PIN, ESP_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+  for(;;){
+    if(uart_read_bytes(ESP_UART_PORT, &co2, 4, pdMS_TO_TICKS(1000)) == 4){
+      printf("co2 reading recieved successfully from ESP32\n");
+      printf("co2 [received]: %d\n", co2);
+    }
+    else {
+      printf("Error receiving co2 reading from ESP32\n");
+    }
+    
+    xSemaphoreTake(s1, portMAX_DELAY);
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    buffer[i] = {CO2, (float)co2};
+    i = (i+1)%N;
+    xSemaphoreGive(mutex);
+    xSemaphoreGive(s2);
+    
+    // [Period]
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
+  }
   vTaskDelete(NULL);
 }
 
@@ -77,64 +137,4 @@ void processSensorData(SensorData data, float* temperature, float* humidity, int
             exit(1);
             break;
     }
-}
-
-void vCO2_Task(void *pvParameters){
-
-  TickType_t xLastWakeTime = xTaskGetTickCount();
-
-  const uart_config_t uart_config_esp = {
-    .baud_rate = 9600,
-    .data_bits = UART_DATA_8_BITS,
-    .parity = UART_PARITY_DISABLE,
-    .stop_bits = UART_STOP_BITS_1,
-    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-    .source_clk = UART_SCLK_APB,
-  };
-
-  uart_driver_install(ESP_UART_PORT,  RX_BUF_SIZE * 2, 0, 0, NULL, 0);
-  uart_param_config(ESP_UART_PORT, &uart_config_esp);
-  uart_set_pin(ESP_UART_PORT, ESP_TX_PIN, ESP_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
-  uint8_t co2_buffer[4];
-  int co2;
-  int txBytes;
-
-  for(;;){
-    if((txBytes = uart_read_bytes(ESP_UART_PORT, co2_buffer, 4, pdMS_TO_TICKS(1000))) == 4){
-      co2 = co2_buffer[0] + co2_buffer[1] << 8 + co2_buffer[2] << 16 + co2_buffer[3] << 24;
-    }
-    else {
-      printf("Error receiving CO2 from ESP32\n");
-    }
-    printf("CO2 reading recieved successfully from ESP32, value : %d\n", txBytes);
-    xSemaphoreTake(s1, portMAX_DELAY);
-    xSemaphoreTake(mutex, portMAX_DELAY);
-    buffer[i] = {CO2, (float)co2};
-    i = (i+1)%N;
-    xSemaphoreGive(mutex);
-    xSemaphoreGive(s2);
-    printf("CO2 [received]: %d\n", co2);
-    // [Period]
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
-  }
-  vTaskDelete(NULL);
-}
-
-void setup() {
-  Serial.begin(115200);
-  dht.setup(DHT_PIN, DHTesp::DHT_TYPE);
-
-  s1 = xSemaphoreCreateCounting( N, N );
-  s2 = xSemaphoreCreateCounting( N, 0 );
-  mutex = xSemaphoreCreateMutex();
-
-  xTaskCreate(vDht22_Task, "dht22_Task", 4096, NULL, 5, NULL);
-  xTaskCreate(vOled_Task, "oled_Task", 4096, NULL, 5, NULL);
-  xTaskCreate(vCO2_Task, "vCO2_Task", 4096, NULL, 5, NULL);
-  vTaskDelete(NULL);
-}
-
-void loop() {
-  vTaskDelete(NULL);
 }
