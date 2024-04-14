@@ -2,8 +2,9 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
-#define TX_PIN GPIO_NUM_17
-#define RX_PIN GPIO_NUM_16
+#define TX_PIN GPIO_NUM_16
+#define RX_PIN GPIO_NUM_17
+#define PWNM_PIN GPIO_NUM_23
 #define ESP_RX_PIN GPIO_NUM_26
 #define ESP_TX_PIN GPIO_NUM_27
 #define ECHO_PIN GPIO_NUM_32

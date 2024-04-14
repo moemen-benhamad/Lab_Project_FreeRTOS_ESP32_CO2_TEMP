@@ -1,12 +1,13 @@
 #include "header.h"
-// TODO : CHECK ALL THE FUCNTIONS
-// TODO : DECIDE ON PERIODE OF TASKS
+
+// TODO : DECIDE ON PERIODE AND PRIORITY OF TASKS
 // TODO : SEND -1 CO2 value when no response from sensor
-// TODO : Fix IDLE (CPU 0) problem
+// TODO : USE ULTRASONIC SENSOR FOR SIGNALING
 
 void app_main() {
     xTaskCreate(vmh_z19b_task, "mh_z19b_task", 4096, NULL, 1, NULL);
     xTaskCreate(vhcsr04_task, "hcsr04_task", 4096, NULL, 1, NULL);
+
     vTaskDelete(NULL);
 }
 
@@ -45,8 +46,9 @@ void vmh_z19b_task(void *pvParameters){
 
     for(;;){
         uart_write_bytes(UART_PORT, "\xFF\x01\x86\x00\x00\x00\x00\x00\x79", 9);
+
         // [Period]
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000)); // could it be less than 1000?
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000)); // could be less than 1000?
 
         if (uart_read_bytes(UART_PORT, data, 9, pdMS_TO_TICKS(1000)) == 9) {
             checksum = getCheckSum(data);
@@ -65,38 +67,36 @@ void vmh_z19b_task(void *pvParameters){
         } else {
             printf("No response from MH-Z19B\n");
         }
-
-        // [Period]
-        //vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000)); // to leave or not to leave?
     }
     vTaskDelete(NULL);
 }
 
 void vhcsr04_task(void *pvParameters){
+
     TickType_t xLastWakeTime = xTaskGetTickCount();
     gpio_set_direction(TRIGGER_PIN, GPIO_MODE_OUTPUT);
     gpio_set_direction(ECHO_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(ECHO_PIN, GPIO_PULLDOWN_ONLY);
+    uint32_t start_time = 0;
+    uint32_t end_time = 0;
+    uint32_t pulse_duration = 0;
+    float distance_cm = 0;
 
     for(;;) {
-        // Send a 10us pulse to trigger pin
         gpio_set_level(TRIGGER_PIN, 1);
         vTaskDelay(pdMS_TO_TICKS(1));
         gpio_set_level(TRIGGER_PIN, 0);
 
-        uint32_t start_time = 0;
+        start_time = 0;
         while (gpio_get_level(ECHO_PIN) == 0);
         start_time = esp_timer_get_time();
 
-        uint32_t end_time = 0;
+        end_time = 0;
         while (gpio_get_level(ECHO_PIN) == 1);
         end_time = esp_timer_get_time();
 
-        uint32_t pulse_duration = end_time - start_time;
-
-        // Calculate distance in centimeters
-        float distance_cm = (float)pulse_duration * 0.017; // Speed of sound : 343 m/s
-
+        pulse_duration = end_time - start_time;
+        distance_cm = (float)pulse_duration * 0.017; // Speed of sound : 343 m/s
         printf("Distance: %.2f cm\n", distance_cm);
 
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1000));
@@ -106,9 +106,8 @@ void vhcsr04_task(void *pvParameters){
 
 uint8_t getCheckSum(uint8_t *packet){
     int checksum = 0;
-        for (int i = 1; i < 8; i++) {
+    for (int i = 1; i < 8; i++)
         checksum += packet[i];
-    }
     checksum = 0xff - checksum + 1;
 
     return checksum;
