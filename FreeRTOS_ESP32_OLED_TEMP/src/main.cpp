@@ -2,7 +2,6 @@
 #include "frames.h"
 
 // TODO : DECIDE ON PERIOD AND Priority OF TASKS
-// TODO : LOADING SCREEN WHEN NO MEASURMENTS
 
 void setup() {
   Serial.begin(115200);
@@ -13,9 +12,10 @@ void setup() {
   s2 = xSemaphoreCreateCounting( N, 0 );
   mutex = xSemaphoreCreateMutex();
 
-  xTaskCreate(vDht22_Task, "dht22_Task", 4096, NULL, 1, NULL);
-  xTaskCreate(vOled_Task, "oled_Task", 4096, NULL, 1, NULL);
-  xTaskCreate(vCo2_Task, "co2_Task", 4096, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(vDht22_Task, "dht22_Task", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(vOled_Task, "oled_Task", 4096, NULL, 1, NULL , 0);
+  xTaskCreatePinnedToCore(vCo2_Task, "co2_Task", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(vWebServer_Task, "webServer_Task", 4096, NULL, 1, NULL, 1);
 
   vTaskDelete(NULL);
 }
@@ -74,6 +74,11 @@ void vOled_Task(void *pvParameters) {
     xSemaphoreGive(s1);
 
     processSensorData(data, &temperature, &humidity, &co2);
+
+    // Server variables
+    server_temperature = temperature;
+    server_humidity = humidity;
+    server_co2 = co2;
 
     display.clear();
     display.setFont(ArialMT_Plain_16);    
@@ -134,6 +139,26 @@ void vCo2_Task(void *pvParameters){
   vTaskDelete(NULL);
 }
 
+void vWebServer_Task(void *pvParameters){
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  // Set up WiFi access point
+  WiFi.softAP(ssid, password);
+  WiFi.setHostname(hostname);
+  
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("Access Point IP address: ");
+  Serial.println(IP);
+
+  server.on("/", handleRoot);
+  server.begin();
+
+  for(;;){
+    server.handleClient();
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(10));
+  }
+  vTaskDelete(NULL);
+}
+
 void processSensorData(SensorData data, float* temperature, float* humidity, int* co2) {
   switch (data.type) {
     case TEMPERATURE:
@@ -151,6 +176,17 @@ void processSensorData(SensorData data, float* temperature, float* humidity, int
   }
 }
 
+void handleRoot() {
+  String webpage = "<html><head><title>ESP32 Sensor Data</title></head><body>";
+  webpage += "<h1>ESP32 Sensor Data</h1>";
+  webpage += "<p>Temperature: <span id='temp'>" + String(server_temperature) + "</span> C</p>";
+  webpage += "<p>Humidity: <span id='humidity'>" + String(server_humidity) + "</span> % rh</p>";
+  webpage += "<p>CO2: <span id='co2'>" + String(server_co2) + "</span> ppm</p>";
+  webpage += "<script>setTimeout(function(){location.reload();}," + String(CONSUMER_TASK_PERIOD) + ");</script>";
+  webpage += "</body></html>";
+
+  server.send(200, "text/html", webpage);
+}
 void display_buffer() {
     printf("Buffer Contents:\n");
     printf("Index\tType\t\tValue\n");

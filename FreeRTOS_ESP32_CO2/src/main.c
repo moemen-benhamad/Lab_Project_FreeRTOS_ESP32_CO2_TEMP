@@ -1,7 +1,6 @@
 #include "header.h"
 
 // TODO : DECIDE ON PERIODE AND PRIORITY OF TASKS
-// TODO : SEND -1 CO2 value when no response from sensor
 // TODO : USE ULTRASONIC SENSOR FOR SIGNALING
 
 void app_main() {

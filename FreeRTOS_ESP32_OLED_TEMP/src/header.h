@@ -4,11 +4,15 @@
 #include <SSD1306Wire.h> 
 #include <HardwareSerial.h>
 #include "driver/uart.h"
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
 
 #define PC_BUFFER_SIZE 10
 #define N PC_BUFFER_SIZE
-#define OLED_TASK_PERIOD 100
 #define PRODUCER_TASK_PERIOD 1000
+#define CONSUMER_TASK_PERIOD 1000
+#define OLED_TASK_PERIOD CONSUMER_TASK_PERIOD
 #define DHT22_TASK_PERIOD PRODUCER_TASK_PERIOD
 #define CO2_TASK_PERIOD PRODUCER_TASK_PERIOD
 
@@ -20,7 +24,15 @@
 #define ESP_UART_PORT UART_NUM_1 
 #define SCREEN_I2C_ADDR 0x3C
 #define SDA 5 
-#define SCL 4 
+#define SCL 4
+
+const char* ssid = "ESP32-Access-Point";
+const char* password = "password";
+const char* hostname = "esp32-server";
+WebServer server(80);
+float server_temperature = 0;
+float server_humidity = 0;
+float server_co2 = 0;
 
 DHTesp dht;
 SSD1306Wire display(SCREEN_I2C_ADDR, SDA, SCL);
@@ -48,5 +60,7 @@ SensorData buffer[PC_BUFFER_SIZE];
 void vDht22_Task(void *pvParameters);
 void vOled_Task(void *pvParameters);
 void vCo2_Task(void *pvParameters);
+void vWebServer_Task(void *pvParameters);
 void processSensorData(SensorData , float*, float*, int*);
 void display_buffer(); // For testing
+void handleRoot();
