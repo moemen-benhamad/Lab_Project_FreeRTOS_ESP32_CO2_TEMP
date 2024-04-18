@@ -1,7 +1,14 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <Wire.h> 
+#include <SSD1306Wire.h> 
+#include <HardwareSerial.h>
+#include <DHTesp.h>
+#include <WebServer.h>
+#include "driver/uart.h"
 #include "header.h"
 #include "frames.h"
-
-// TODO : DECIDE ON PERIOD AND Priority OF TASKS
 
 void setup() {
   Serial.begin(115200);
@@ -12,10 +19,10 @@ void setup() {
   s2 = xSemaphoreCreateCounting( N, 0 );
   mutex = xSemaphoreCreateMutex();
 
-  xTaskCreatePinnedToCore(vDht22_Task, "dht22_Task", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(vOled_Task, "oled_Task", 4096, NULL, 1, NULL , 0);
-  xTaskCreatePinnedToCore(vCo2_Task, "co2_Task", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(vWebServer_Task, "webServer_Task", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(vdht22_Task, "dht22_Task", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(voled_Task, "oled_Task", 4096, NULL, 1, &voled_task_handle , 0);
+  xTaskCreatePinnedToCore(vuart_rx_task, "uart_rx_task", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(vweb_server_Task, "webServer_Task", 4096, NULL, 1, NULL, 1);
 
   vTaskDelete(NULL);
 }
@@ -24,7 +31,7 @@ void loop() {
   vTaskDelete(NULL);
 }
 
-void vDht22_Task(void *pvParameters) {
+void vdht22_Task(void *pvParameters) {
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   float temperature = 0;
@@ -45,16 +52,15 @@ void vDht22_Task(void *pvParameters) {
       i = (i+1)%N;
       xSemaphoreGive(mutex);
       xSemaphoreGive(s2);
-      printf("Temperature: %f, Humidity: %f\n", temperature, humidity);
+      printf("Temperature: %.2f, Humidity: %.2f\n", temperature, humidity);
     }
 
-    // [PERIOD]
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(DHT22_TASK_PERIOD)); // dht.getMinimumSamplingPeriod()
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(DHT22_TASK_PERIOD));
   }
   vTaskDelete(NULL);
 }
 
-void vOled_Task(void *pvParameters) {
+void voled_Task(void *pvParameters) {
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   SensorData data;
@@ -66,6 +72,9 @@ void vOled_Task(void *pvParameters) {
 
   display.init();           
   display.clear();
+  display.displayOff();
+
+  vTaskSuspend(NULL);
       
   for (;;) {
     xSemaphoreTake(s2, portMAX_DELAY);
@@ -93,17 +102,16 @@ void vOled_Task(void *pvParameters) {
     display.display();
     frame = (frame + 1) % FRAME_COUNT; 
 
-    // [Period]
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(OLED_TASK_PERIOD));   
   }
 
   vTaskDelete(NULL);
 }
 
-void vCo2_Task(void *pvParameters){
+void vuart_rx_task(void *pvParameters){
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  int co2 = 0;
+  TickType_t xLastSuspendTime;
   const uart_config_t uart_config_esp = {
     .baud_rate = 9600,
     .data_bits = UART_DATA_8_BITS,
@@ -118,28 +126,35 @@ void vCo2_Task(void *pvParameters){
   uart_set_pin(ESP_UART_PORT, ESP_TX_PIN, ESP_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
   for(;;){
-    if(uart_read_bytes(ESP_UART_PORT, &co2, 4, pdMS_TO_TICKS(1000)) == 4){
-      printf("co2 reading recieved successfully from ESP32\n");
-      printf("co2 [received]: %d\n", co2);
+    if(uart_read_bytes(ESP_UART_PORT, &uart_serial_data, 5, portMAX_DELAY) == 5){
+      printf("UART data recieved successfully from ESP32 : %d | %d\n", uart_serial_data.wake_diplay_signal, uart_serial_data.co2_value);
     }
     else {
       printf("Error receiving co2 reading from ESP32\n");
     }
+
+    if(uart_serial_data.wake_diplay_signal == 1){
+      display.displayOn(); // MX?
+      vTaskResume(voled_task_handle);
+      xLastSuspendTime = xTaskGetTickCount();
+      vTaskDelayUntil(&xLastSuspendTime, pdMS_TO_TICKS(DISPLAY_TIMEOUT)); // ??
+      vTaskSuspend(voled_task_handle);
+      display.displayOff();
+    }
     
     xSemaphoreTake(s1, portMAX_DELAY);
     xSemaphoreTake(mutex, portMAX_DELAY);
-    buffer[i] = {CO2, (float)co2};
+    buffer[i] = {CO2, (float) uart_serial_data.co2_value};
     i = (i+1)%N;
     xSemaphoreGive(mutex);
     xSemaphoreGive(s2);
     
-    // [Period]
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(CO2_TASK_PERIOD));
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(UART_RX_TASK_PERIOD));
   }
   vTaskDelete(NULL);
 }
 
-void vWebServer_Task(void *pvParameters){
+void vweb_server_Task(void *pvParameters){
   TickType_t xLastWakeTime = xTaskGetTickCount();
   // Set up WiFi access point
   WiFi.softAP(ssid, password);
@@ -186,24 +201,4 @@ void handleRoot() {
   webpage += "</body></html>";
 
   server.send(200, "text/html", webpage);
-}
-void display_buffer() {
-    printf("Buffer Contents:\n");
-    printf("Index\tType\t\tValue\n");
-    printf("--------------------------------\n");
-    for (int i = 0; i < 10; i++) {
-      printf("%d\t", i);
-      switch (buffer[i].type) {
-        case TEMPERATURE:
-          printf("Temperature\t");
-          break;
-        case HUMIDITY:
-          printf("Humidity\t");
-          break;
-        case CO2:
-          printf("CO2\t\t");
-          break;
-      }
-      printf("%.2f\n", buffer[i].value);
-    }
 }
