@@ -20,7 +20,7 @@ void setup() {
   mutex = xSemaphoreCreateMutex();
 
   xTaskCreatePinnedToCore(vdht22_Task, "dht22_Task", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(voled_Task, "oled_Task", 4096, NULL, 1, &voled_task_handle , 0);
+  xTaskCreatePinnedToCore(voled_Task, "oled_Task", 4096, NULL, 1, NULL , 0);
   xTaskCreatePinnedToCore(vuart_rx_task, "uart_rx_task", 4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(vweb_server_Task, "webServer_Task", 4096, NULL, 1, NULL, 1);
 
@@ -40,8 +40,10 @@ void vdht22_Task(void *pvParameters) {
   for (;;) {                 
     temperature = dht.getTemperature();     
     humidity = dht.getHumidity();             
-    if (isnan(temperature) || isnan(humidity)) {  
-      printf("Failed to read from DHT sensor!\n");
+    if (isnan(temperature) || isnan(humidity)) {
+      #ifdef SHOW_DHT22_ERROR_MSGS  
+        printf("[DHT22] Failed!\n");
+      #endif
     }
     else {
       xSemaphoreTake(s1, portMAX_DELAY);
@@ -52,7 +54,11 @@ void vdht22_Task(void *pvParameters) {
       i = (i+1)%N;
       xSemaphoreGive(mutex);
       xSemaphoreGive(s2);
-      printf("Temperature: %.2f, Humidity: %.2f\n", temperature, humidity);
+
+      #ifdef SHOW_DHT22_MEASURMENTS
+        printf("[DHT22] Temperature: %.2f\n", temperature);
+        printf("[DHT22] Humidity: %.2f\n", humidity);
+      #endif
     }
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(DHT22_TASK_PERIOD));
@@ -72,9 +78,13 @@ void voled_Task(void *pvParameters) {
 
   display.init();           
   display.clear();
-  display.displayOff();
-
-  vTaskSuspend(NULL);
+  #ifdef DISPLAY_ALWAYS_ON
+    display.displayOn();
+    display_isOn = true;
+  #else
+    display.displayOff();
+    display_isOn = false;
+  #endif
       
   for (;;) {
     xSemaphoreTake(s2, portMAX_DELAY);
@@ -85,22 +95,28 @@ void voled_Task(void *pvParameters) {
     processSensorData(data, &temperature, &humidity, &co2);
 
     // Server variables
-    server_temperature = temperature;
+    server_temperature = temperature; // MX???
     server_humidity = humidity;
     server_co2 = co2;
 
-    display.clear();
-    display.setFont(ArialMT_Plain_16);    
-    display.drawString(32, 2, "" + String(temperature) + " °C");
-    display.setFont(ArialMT_Plain_10); 
-    display.drawString(32, 18, "" + String(humidity) + " % rh");
-    display.setFont(ArialMT_Plain_16); 
-    display.drawRect(14, 40, 102 , 19); //36
-    display.drawString(40, 40, String(co2) + " ppm");
-    display.drawXbm(0, 0, FRAME_WIDTH, FRAME_HEIGHT, frames_temperature[frame]);
-    display.drawXbm(0, 32, CO2_ICON_HEIGHT, CO2_ICON_WIDTH, co2_icon_bits);
-    display.display();
-    frame = (frame + 1) % FRAME_COUNT; 
+    if(display_isOn){ // MX???
+      display.clear();
+      display.setFont(ArialMT_Plain_16);    
+      display.drawString(32, 2, "" + String(temperature) + " °C");
+      display.setFont(ArialMT_Plain_10); 
+      display.drawString(32, 18, "" + String(humidity) + " % rh");
+      display.setFont(ArialMT_Plain_16); 
+      display.drawRect(14, 40, 102 , 19); 
+      display.drawString(40, 40, String(co2) + " ppm");
+      display.drawXbm(0, 0, FRAME_WIDTH, FRAME_HEIGHT, frames_temperature[frame]);
+      display.drawXbm(0, 32, CO2_ICON_HEIGHT, CO2_ICON_WIDTH, co2_icon_bits);
+      display.display();
+      frame = (frame + 1) % FRAME_COUNT; 
+
+      #ifdef DISPLAY_STATE_MSGS
+        printf("[DISPLAY] Display Updated\n");
+      #endif
+    }
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(OLED_TASK_PERIOD));   
   }
@@ -111,7 +127,8 @@ void voled_Task(void *pvParameters) {
 void vuart_rx_task(void *pvParameters){
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
-  TickType_t xLastSuspendTime;
+  TickType_t xLastDisplayWakeTime = esp_timer_get_time();
+  TickType_t now = esp_timer_get_time();
   const uart_config_t uart_config_esp = {
     .baud_rate = 9600,
     .data_bits = UART_DATA_8_BITS,
@@ -127,19 +144,16 @@ void vuart_rx_task(void *pvParameters){
 
   for(;;){
     if(uart_read_bytes(ESP_UART_PORT, &uart_serial_data, 5, portMAX_DELAY) == 5){
-      printf("UART data recieved successfully from ESP32 : %d | %d\n", uart_serial_data.wake_diplay_signal, uart_serial_data.co2_value);
+      #ifdef ESP_UART_MSGS
+        printf("[UART ESP32] Data recieved successfully\n");
+        printf("  > Cppm : %d\n", uart_serial_data.co2_value);
+        printf("  > Wake up signal : %d\n", uart_serial_data.wake_diplay_signal);
+      #endif
     }
     else {
-      printf("Error receiving co2 reading from ESP32\n");
-    }
-
-    if(uart_serial_data.wake_diplay_signal == 1){
-      display.displayOn(); // MX?
-      vTaskResume(voled_task_handle);
-      xLastSuspendTime = xTaskGetTickCount();
-      vTaskDelayUntil(&xLastSuspendTime, pdMS_TO_TICKS(DISPLAY_TIMEOUT)); // ??
-      vTaskSuspend(voled_task_handle);
-      display.displayOff();
+      #ifdef ESP_UART_MSGS
+        printf("[UART ESP32] Error receiving data!\n");
+      #endif
     }
     
     xSemaphoreTake(s1, portMAX_DELAY);
@@ -148,7 +162,34 @@ void vuart_rx_task(void *pvParameters){
     i = (i+1)%N;
     xSemaphoreGive(mutex);
     xSemaphoreGive(s2);
-    
+
+    #ifndef DISPLAY_ALWAYS_ON
+      if(!display_isOn){
+        if(uart_serial_data.wake_diplay_signal == 1){
+          xLastDisplayWakeTime = esp_timer_get_time()/1000;
+          display.displayOn(); // MX???
+          display_isOn = true;
+
+          #ifdef DISPLAY_STATE_MSGS
+            printf("[DISPLAY] Display ON\n");
+          #endif
+
+        }
+      }
+      else{
+        now = esp_timer_get_time()/1000;
+        if(now - xLastDisplayWakeTime >= DISPLAY_TIMEOUT){
+          display_isOn = false;
+          display.displayOff(); // MX???
+
+          #ifdef DISPLAY_STATE_MSGS
+            printf("[DISPLAY] Display OFF\n");
+          #endif
+
+        }
+      }
+    #endif
+  
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(UART_RX_TASK_PERIOD));
   }
   vTaskDelete(NULL);
@@ -156,20 +197,22 @@ void vuart_rx_task(void *pvParameters){
 
 void vweb_server_Task(void *pvParameters){
   TickType_t xLastWakeTime = xTaskGetTickCount();
+
   // Set up WiFi access point
   WiFi.softAP(ssid, password);
   WiFi.setHostname(hostname);
   
-  IPAddress IP = WiFi.softAPIP();
-  Serial.print("Access Point IP address: ");
-  Serial.println(IP);
+  Serial.print("[WEBSERVER] IP: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.print("[WEBSERVER] Hostname: ");
+  Serial.println(WiFi.getHostname());
 
   server.on("/", handleRoot);
   server.begin();
 
   for(;;){
     server.handleClient();
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(10));
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(WEBSERVER_TASK_PERIOD));
   }
   vTaskDelete(NULL);
 }
@@ -186,7 +229,6 @@ void processSensorData(SensorData data, float* temperature, float* humidity, int
       *co2 = (int)data.value;
       break;
     default:
-      printf("Unknown data type!\n");
       break;
   }
 }

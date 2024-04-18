@@ -1,23 +1,40 @@
-#define PC_BUFFER_SIZE 10
-#define N PC_BUFFER_SIZE
-int i = 0; 
-#define DISPLAY_TIMEOUT 10000
-
-
 /*---------------------- COMPILER FLAGS -----------------------*/
-//#define SHOW_ERROR_MSGS
-//#define SHOW_IMPORTANT_ERROR_MSGS
-//#define SHOW_SENSOR_MEASURMENTS
+
+/*                  :: Uncomment to use ::                     */
+
+// #define DISPLAY_ALWAYS_ON
+ #define DISPLAY_STATE_MSGS
+#define ESP_UART_MSGS
+#define SHOW_DHT22_MEASURMENTS
+// #define SHOW_DHT22_ERROR_MSGS
+
+/*-------------------------------------------------------------*/
+
+
+/*--------------------- DISPLAY_TIMEOUT -----------------------*/
+#define DISPLAY_TIMEOUT 10000
 /*-------------------------------------------------------------*/
 
 
 /*---------------------- TASK PERIODS -------------------------*/
-#define UART_RX_TASK_PERIOD 500
-#define PRODUCER_TASK_PERIOD 4000
+#define UART_RX_TASK_PERIOD 100
+#define WEBSERVER_TASK_PERIOD 100
 #define CONSUMER_TASK_PERIOD 1000
+#define PRODUCER_TASK_PERIOD 4000
 #define OLED_TASK_PERIOD CONSUMER_TASK_PERIOD
 #define DHT22_TASK_PERIOD PRODUCER_TASK_PERIOD
 #define CO2_TASK_PERIOD PRODUCER_TASK_PERIOD
+/*-------------------------------------------------------------*/
+
+
+/*------------------- WiFi & Server Config  --------------------*/
+const char* ssid = "ESP32-AP";
+const char* password = "password";
+const char* hostname = "esp32";
+WebServer server(80);
+float server_temperature = 0;
+float server_humidity = 0;
+float server_co2 = 0;
 /*-------------------------------------------------------------*/
 
 
@@ -44,18 +61,9 @@ SSD1306Wire display(SCREEN_I2C_ADDR, SDA, SCL);
 /*-------------------------------------------------------------*/
 
 
-/*------------------- WiFi & Server Config  --------------------*/
-const char* ssid = "ESP32-AP";
-const char* password = "password";
-const char* hostname = "esp32";
-WebServer server(80);
-float server_temperature = 0;
-float server_humidity = 0;
-float server_co2 = 0;
-/*-------------------------------------------------------------*/
-
-
 /*-------------------- SEMAPHORES & MUTEXS --------------------*/
+#define N 2
+int i = 0; 
 SemaphoreHandle_t s1 = NULL;
 SemaphoreHandle_t s2 = NULL;
 SemaphoreHandle_t mutex = NULL;
@@ -64,6 +72,8 @@ SemaphoreHandle_t s_wake_display = NULL;
 
 
 /*---------------------- VARS & TYPEDEFS ----------------------*/
+uint8_t display_isOn = false;
+
 typedef enum {
     TEMPERATURE,
     HUMIDITY,
@@ -82,10 +92,9 @@ typedef struct {
 
 UartSerialData uart_serial_data;
 
-SensorData buffer[PC_BUFFER_SIZE];
+SensorData buffer[N];
 /*-------------------------------------------------------------*/
 
-TaskHandle_t voled_task_handle;
 
 /*---------------------- FUNCTION HEADERS ----------------------*/
 

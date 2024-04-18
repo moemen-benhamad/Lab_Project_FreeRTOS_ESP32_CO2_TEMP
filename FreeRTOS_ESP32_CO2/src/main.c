@@ -47,13 +47,13 @@ void vmh_z19b_uart_task(void *pvParameters){
     uart_set_pin(UART_PORT, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
     if(uart_write_bytes(UART_PORT, "\xFF\x01\x99\x00\x00\x00\x13\x88\xCB", 9) == 9){
-        #ifdef SHOW_ERROR_MSGS
-            printf("Range changed to 5000 successfully.\n");
+        #ifdef SHOW_MH_Z19B_ERROR_MSGS
+            printf("[MH-Z19B|RANGE] Changed to 5000 successfully\n");
         #endif
     }
     else {
-        #ifdef SHOW_ERROR_MSGS
-            printf("Range checksum error!\n");
+        #ifdef SHOW_MH_Z19B_ERROR_MSGS
+            printf("[MH-Z19B|RANGE] Checksum error!\n");
         #endif
     };
 
@@ -73,18 +73,18 @@ void vmh_z19b_uart_task(void *pvParameters){
                     xSemaphoreGive(uart_sync);
                 }
                 
-                #ifdef SHOW_SENSOR_MEASURMENTS
-                    printf("CO2 Concentration [UART]: %d ppm\n", co2_value);
+                #ifdef SHOW_MH_Z19B_MEASURMENTS
+                    printf("[MH-Z19B|UART] CO2 Concentration: %d ppm\n", co2_value);
                 #endif
 
             } else {
-                #ifdef SHOW_ERROR_MSGS
-                    printf("Checksum error!\n");
+                #ifdef SHOW_MH_Z19B_ERROR_MSGS
+                    printf("[MH-Z19B|UART] Checksum error!\n");
                 #endif
             }
         } else {
-            #ifdef SHOW_ERROR_MSGS
-                printf("No response from MH-Z19B!\n");
+            #ifdef SHOW_MH_Z19B_ERROR_MSGS
+                printf("[MH-Z19B|UART] No response!\n");
             #endif
         }
     }
@@ -118,14 +118,21 @@ void vhcsr04_task(void *pvParameters){
         pulse_duration = end_time - start_time;
         distance_cm = (float)pulse_duration * 0.017; // Speed of sound : 343 m/s
         if(distance_cm <= WAKE_UP_DISTANCE_CM){
+            if(uart_serial_data.wake_diplay_signal == 0){ // MX???
+                xSemaphoreTake(mutex, portMAX_DELAY);
+                uart_serial_data.wake_diplay_signal = 1;
+                xSemaphoreGive(mutex);
+                xSemaphoreGive(uart_sync); 
+            }
+        }
+        else{
             xSemaphoreTake(mutex, portMAX_DELAY);
-            uart_serial_data.wake_diplay_signal = 1;
+            uart_serial_data.wake_diplay_signal = 0;
             xSemaphoreGive(mutex);
-            xSemaphoreGive(uart_sync);
         }
 
-        #ifdef SHOW_SENSOR_MEASURMENTS
-            printf("Distance: %.2f cm\n", distance_cm);
+        #ifdef SHOW_HCR04_MEASURMENTS
+            printf("[HCSR04] Distance: %.2f cm\n", distance_cm);
         #endif
 
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(HCR04_TASK_DELAY));
@@ -156,36 +163,42 @@ void vuart_tx_task(void *pvParameters){
             uart_serial_data_local = uart_serial_data;
         xSemaphoreGive(mutex);
         if(uart_write_bytes(ESP_UART_PORT, &uart_serial_data_local, 5) == 5){
-            #ifdef SHOW_IMPORTANT_ERROR_MSGS
-                printf("UART data successfully sent to ESP32 OLED: %d|%d\n", uart_serial_data_local.wake_diplay_signal, uart_serial_data_local.co2_value);
+            #ifdef SHOW_UART_MSGS
+                printf("[UART ESP32 OLED] Data sent successfully\n");
+                printf("  > Cppm : %d\n", uart_serial_data_local.co2_value);
+                printf("  > Wake up signal : %d\n", uart_serial_data_local.wake_diplay_signal);
             #endif
         }
         else {
-            #ifdef SHOW_IMPORTANT_ERROR_MSGS
-                printf("Error sending UART data reading to ESP32 OLED\n");
+            #ifdef SHOW_UART_MSGS
+                printf("[UART ESP32 OLED] Error sending UART data\n");
             #endif
         }
+        /*
         if(uart_serial_data_local.wake_diplay_signal == 1){
             xSemaphoreTake(mutex, portMAX_DELAY);
             uart_serial_data.wake_diplay_signal = 0;
             xSemaphoreGive(mutex);
         }
+        */
     }
     vTaskDelete(NULL);
 }
 
 void vmh_z19b_pwm_task( void *pvParameters ){
+
     TickType_t xLastWakeTime = xTaskGetTickCount();
+
     for(;;){
-        if(Cppm > 0){
+        if(Cppm > 0){ // MX???
             xSemaphoreTake(s_sync, portMAX_DELAY);
             xSemaphoreTake(mutex, portMAX_DELAY);
             uart_serial_data.co2_value = (int) Cppm;
             xSemaphoreGive(mutex);
             xSemaphoreGive(uart_sync);
         }
-        #ifdef SHOW_SENSOR_MEASURMENTS
-            printf("CO2 concentration [PWM]: %llu ppm\n", Cppm);
+        #ifdef SHOW_MH_Z19B_MEASURMENTS
+            printf("[MH-Z19B|PWM] CO2 concentration: %llu ppm\n", Cppm);
         #endif
 
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(MH_Z19B_TASK_DELAY));
@@ -194,6 +207,7 @@ void vmh_z19b_pwm_task( void *pvParameters ){
 }
 
 void sspi(void *arg){
+
     uint64_t now = esp_timer_get_time()/1000;
     uint8_t state = gpio_get_level(PWM_PIN);
 
