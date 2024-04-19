@@ -1,3 +1,11 @@
+/*  ------------------------------------------------- WARNING --------------------------------------------------------------
+
+  !CONNECT RED WIRE TO 5V WHEN POWERING WITH USB.
+  !CONNECT RED WIRE TO VCC WHEN POWERING WITH AN EXERNAL POWER SOURCE (ESP32), other with the oled display won't turn on.
+
+-------------------------------------------------------------------------------------------------------------------------- */
+
+
 /*---------------------- COMPILER FLAGS -----------------------*/
 
 /*                  :: Uncomment to use ::                     */
