@@ -25,11 +25,13 @@ void setup() {
   s1 = xSemaphoreCreateCounting( N, N );
   s2 = xSemaphoreCreateCounting( N, 0 );
   mutex = xSemaphoreCreateMutex();
+  server_mx = xSemaphoreCreateMutex();
+  display_mx = xSemaphoreCreateMutex();
 
-  xTaskCreatePinnedToCore(vdht22_Task, "dht22_Task", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(voled_Task, "oled_Task", 4096, NULL, 1, NULL , 0);
+  xTaskCreatePinnedToCore(vdht22_task, "dht22_Task", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(voled_task, "oled_Task", 4096, NULL, 1, NULL , 0);
   xTaskCreatePinnedToCore(vuart_rx_task, "uart_rx_task", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(vweb_server_Task, "webServer_Task", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(vweb_server_task, "webServer_Task", 4096, NULL, 1, NULL, 1);
 
   vTaskDelete(NULL);
 }
@@ -38,7 +40,7 @@ void loop() {
   vTaskDelete(NULL);
 }
 
-void vdht22_Task(void *pvParameters) {
+void vdht22_task(void *pvParameters) {
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   float temperature = 0;
@@ -73,7 +75,7 @@ void vdht22_Task(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
-void voled_Task(void *pvParameters) {
+void voled_task(void *pvParameters) {
 
   TickType_t xLastWakeTime = xTaskGetTickCount();
   SensorData data;
@@ -87,10 +89,15 @@ void voled_Task(void *pvParameters) {
   display.clear();
   #ifdef DISPLAY_ALWAYS_ON
     display.displayOn();
+    xSemaphoreTake(display_mx, portMAX_DELAY);
     display_isOn = true;
+    xSemaphoreGive(display_mx);
+
   #else
     display.displayOff();
+    xSemaphoreTake(display_mx, portMAX_DELAY);
     display_isOn = false;
+    xSemaphoreGive(display_mx);
   #endif
       
   for (;;) {
@@ -101,12 +108,21 @@ void voled_Task(void *pvParameters) {
 
     processSensorData(data, &temperature, &humidity, &co2);
 
-    // Server variables
-    server_temperature = temperature; // MX???
+    // NEW
+    xSemaphoreTake(server_mx, portMAX_DELAY);
+    server_data.temperature = temperature;
+    server_data.humidity = humidity;
+    server_data.co2 = co2;
+    xSemaphoreGive(server_mx);
+    /*
+    server_temperature = temperature;
     server_humidity = humidity;
     server_co2 = co2;
+    */
 
-    if(display_isOn){ // MX???
+    xSemaphoreTake(display_mx, portMAX_DELAY);
+    if(display_isOn){
+      xSemaphoreGive(display_mx);
       display.clear();
       display.setFont(ArialMT_Plain_16);    
       display.drawString(32, 2, "" + String(temperature) + " °C");
@@ -123,6 +139,9 @@ void voled_Task(void *pvParameters) {
       #ifdef DISPLAY_STATE_MSGS
         printf("[DISPLAY] Display Updated\n");
       #endif
+    }
+    else{
+      xSemaphoreGive(display_mx);
     }
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(OLED_TASK_PERIOD));   
@@ -171,11 +190,15 @@ void vuart_rx_task(void *pvParameters){
     xSemaphoreGive(s2);
 
     #ifndef DISPLAY_ALWAYS_ON
+      xSemaphoreTake(display_mx, portMAX_DELAY);
       if(!display_isOn){
+        xSemaphoreGive(display_mx);
         if(uart_serial_data.wake_diplay_signal == 1){
           xLastDisplayWakeTime = esp_timer_get_time()/1000;
-          display.displayOn(); // MX???
+          display.displayOn();
+          xSemaphoreTake(display_mx, portMAX_DELAY);
           display_isOn = true;
+          xSemaphoreGive(display_mx);
 
           #ifdef DISPLAY_STATE_MSGS
             printf("[DISPLAY] Display ON\n");
@@ -184,10 +207,13 @@ void vuart_rx_task(void *pvParameters){
         }
       }
       else{
+        xSemaphoreGive(display_mx);
         now = esp_timer_get_time()/1000;
         if(now - xLastDisplayWakeTime >= DISPLAY_TIMEOUT){
+          xSemaphoreTake(display_mx, portMAX_DELAY);
           display_isOn = false;
-          display.displayOff(); // MX???
+          xSemaphoreGive(display_mx);
+          display.displayOff();
 
           #ifdef DISPLAY_STATE_MSGS
             printf("[DISPLAY] Display OFF\n");
@@ -202,10 +228,9 @@ void vuart_rx_task(void *pvParameters){
   vTaskDelete(NULL);
 }
 
-void vweb_server_Task(void *pvParameters){
+void vweb_server_task(void *pvParameters){
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
-  // Set up WiFi access point
   WiFi.softAP(ssid, password);
   WiFi.setHostname(hostname);
   
@@ -241,11 +266,20 @@ void processSensorData(SensorData data, float* temperature, float* humidity, int
 }
 
 void handleRoot() {
+  float temperature, humidity, co2;
+  ServerData data;
+  xSemaphoreTake(server_mx, portMAX_DELAY);
+  data = server_data;
+  xSemaphoreGive(server_mx);
+  temperature = data.temperature;
+  humidity = data.humidity;
+  co2 =  data.co2;
+
   String webpage = "<html><head><title>ESP32 Sensor Data</title></head><body>";
   webpage += "<h1>ESP32 Sensor Data</h1>";
-  webpage += "<p>Temperature: <span id='temp'>" + String(server_temperature) + "</span> C</p>";
-  webpage += "<p>Humidity: <span id='humidity'>" + String(server_humidity) + "</span> % rh</p>";
-  webpage += "<p>CO2: <span id='co2'>" + String(server_co2) + "</span> ppm</p>";
+  webpage += "<p>Temperature: <span id='temp'>" + String(temperature) + "</span> C</p>";
+  webpage += "<p>Humidity: <span id='humidity'>" + String(humidity) + "</span> % rh</p>";
+  webpage += "<p>CO2: <span id='co2'>" + String(co2) + "</span> ppm</p>";
   webpage += "<script>setTimeout(function(){location.reload();}," + String(CONSUMER_TASK_PERIOD) + ");</script>";
   webpage += "</body></html>";
 

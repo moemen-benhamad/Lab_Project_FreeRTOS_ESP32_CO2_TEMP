@@ -10,8 +10,8 @@
 
 /*                  :: Uncomment to use ::                     */
 
-// #define DISPLAY_ALWAYS_ON
- #define DISPLAY_STATE_MSGS
+//0#define DISPLAY_ALWAYS_ON
+#define DISPLAY_STATE_MSGS
 #define ESP_UART_MSGS
 #define SHOW_DHT22_MEASURMENTS
 // #define SHOW_DHT22_ERROR_MSGS
@@ -75,7 +75,9 @@ int i = 0;
 SemaphoreHandle_t s1 = NULL;
 SemaphoreHandle_t s2 = NULL;
 SemaphoreHandle_t mutex = NULL;
+SemaphoreHandle_t server_mx = NULL;
 SemaphoreHandle_t s_wake_display = NULL;
+SemaphoreHandle_t display_mx = NULL;
 /*-------------------------------------------------------------*/
 
 
@@ -98,18 +100,24 @@ typedef struct {
     uint8_t wake_diplay_signal; 
 } UartSerialData;
 
-UartSerialData uart_serial_data;
+typedef struct {
+    float temperature;
+    float humidity; 
+    int co2;
+} ServerData;
 
+ServerData server_data;
+UartSerialData uart_serial_data;
 SensorData buffer[N];
 /*-------------------------------------------------------------*/
 
 
 /*---------------------- FUNCTION HEADERS ----------------------*/
 
-void vdht22_Task(void *pvParameters);
-void voled_Task(void *pvParameters);
+void vdht22_task(void *pvParameters);
+void voled_task(void *pvParameters);
 void vuart_rx_task(void *pvParameters);
-void vweb_server_Task(void *pvParameters);
+void vweb_server_task(void *pvParameters);
 void processSensorData(SensorData , float*, float*, int*);
 void handleRoot();
 

@@ -17,7 +17,7 @@ void app_main() {
 
     #ifdef USE_PWM_FOR_CO2
         xTaskCreatePinnedToCore(vmh_z19b_pwm_task, "mh_z19b_task", 4096, NULL, 2, NULL,0);
-    #else
+    //#else
         xTaskCreatePinnedToCore(vmh_z19b_uart_task, "mh_z19b_task", 4096, NULL, 1, NULL,0);
     #endif
     xTaskCreatePinnedToCore(vhcsr04_task, "hcsr04_task", 4096, NULL, 1, NULL,0);
@@ -116,13 +116,16 @@ void vhcsr04_task(void *pvParameters){
         end_time = esp_timer_get_time();
 
         pulse_duration = end_time - start_time;
-        distance_cm = (float)pulse_duration * 0.017; // Speed of sound : 343 m/s
+        distance_cm = (float)pulse_duration * 0.017;
         if(distance_cm <= WAKE_UP_DISTANCE_CM){
-            if(uart_serial_data.wake_diplay_signal == 0){ // MX???
-                xSemaphoreTake(mutex, portMAX_DELAY);
+            xSemaphoreTake(mutex, portMAX_DELAY);
+            if(uart_serial_data.wake_diplay_signal == 0){
                 uart_serial_data.wake_diplay_signal = 1;
                 xSemaphoreGive(mutex);
                 xSemaphoreGive(uart_sync); 
+            }
+            else{
+                xSemaphoreGive(mutex);
             }
         }
         else{
@@ -141,6 +144,8 @@ void vhcsr04_task(void *pvParameters){
 }
 
 void vuart_tx_task(void *pvParameters){
+
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     const uart_config_t uart_config_esp = {
         .baud_rate = 9600,
@@ -181,6 +186,8 @@ void vuart_tx_task(void *pvParameters){
             xSemaphoreGive(mutex);
         }
         */
+
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(UART_TX_TASK_DELAY));
     }
     vTaskDelete(NULL);
 }
@@ -190,7 +197,7 @@ void vmh_z19b_pwm_task( void *pvParameters ){
     TickType_t xLastWakeTime = xTaskGetTickCount();
 
     for(;;){
-        if(Cppm > 0){ // MX???
+        if(Cppm > 0){
             xSemaphoreTake(s_sync, portMAX_DELAY);
             xSemaphoreTake(mutex, portMAX_DELAY);
             uart_serial_data.co2_value = (int) Cppm;

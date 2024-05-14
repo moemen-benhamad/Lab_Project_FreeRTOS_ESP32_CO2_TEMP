@@ -5,7 +5,7 @@
 #define USE_PWM_FOR_CO2 // Comment this line to use uart instead
 #define SHOW_MH_Z19B_MEASURMENTS
 // #define SHOW_HCR04_MEASURMENTS
-#define SHOW_UART_MSGS
+// #define SHOW_UART_MSGS
 // #define SHOW_MH_Z19B_ERROR_MSGS
 
 /*-------------------------------------------------------------*/
@@ -14,6 +14,7 @@
 /*---------------------- TASK PERIODS -------------------------*/
 #define MH_Z19B_TASK_DELAY 4000
 #define HCR04_TASK_DELAY 100
+#define UART_TX_TASK_DELAY 100
 /*-------------------------------------------------------------*/
 
 
